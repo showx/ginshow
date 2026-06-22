@@ -26,6 +26,7 @@ func TestMountRegistersDebugEndpoints(t *testing.T) {
 		{cfg.DashboardPath},
 		{cfg.PprofPrefix + "/"},
 		{cfg.PprofPrefix + "/heap"},
+		{cfg.PprofPrefix + "/flame?type=heap"},
 		{cfg.MetricsPath},
 	}
 
@@ -112,10 +113,49 @@ func TestDashboardContainsEmbeddedUI(t *testing.T) {
 		t.Fatalf("unexpected content type: %s", ct)
 	}
 	body := rec.Body.String()
-	for _, needle := range []string{"ginshow", "pprof 快捷入口", "const CFG =", "metricsPath"} {
+	for _, needle := range []string{"ginshow", "火焰图", "pprof 快捷入口", "const CFG =", "metricsPath"} {
 		if !strings.Contains(body, needle) {
 			t.Fatalf("dashboard missing %q", needle)
 		}
+	}
+}
+
+func TestFlameEndpointReturnsTree(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
+	cfg := ginshow.Default()
+	cfg.EnableMiddleware = false
+	ginshow.Mount(r, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, cfg.PprofPrefix+"/flame?type=heap", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Type  string `json:"type"`
+		Unit  string `json:"unit"`
+		Total int64  `json:"total"`
+		Root  struct {
+			Name  string `json:"name"`
+			Value int64  `json:"value"`
+		} `json:"root"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if payload.Type != "heap" {
+		t.Fatalf("unexpected type: %s", payload.Type)
+	}
+	if payload.Unit != "bytes" {
+		t.Fatalf("unexpected unit: %s", payload.Unit)
+	}
+	if payload.Root.Name != "root" {
+		t.Fatalf("unexpected root name: %s", payload.Root.Name)
 	}
 }
 

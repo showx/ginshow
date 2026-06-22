@@ -18,6 +18,7 @@ func registerPprof(group *gin.RouterGroup) {
 	group.GET("/heap", gin.WrapH(pprof.Handler("heap")))
 	group.GET("/mutex", gin.WrapH(pprof.Handler("mutex")))
 	group.GET("/threadcreate", gin.WrapH(pprof.Handler("threadcreate")))
+	group.GET("/flame", flameHandler())
 }
 
 func authMiddleware(auth *AuthConfig) gin.HandlerFunc {

@@ -46,6 +46,18 @@ tr:last-child td,tr:last-child th{border-bottom:none}
 .alert.show{display:block}
 footer{padding:16px 24px;text-align:center;color:#475569;font-size:.75rem;border-top:1px solid #1e293b}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.8125rem;background:#1e293b;padding:2px 6px;border-radius:4px}
+.flame-panel{background:#111827;border:1px solid #1e293b;border-radius:12px;padding:16px}
+.flame-toolbar{margin-bottom:12px}
+.flame-toolbar select{padding:6px 10px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:.875rem}
+.flame-meta{font-size:.8125rem;color:#94a3b8;margin-bottom:10px;min-height:1.25rem}
+.flame-breadcrumb{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;font-size:.8125rem}
+.flame-breadcrumb button{padding:4px 8px;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#cbd5e1;cursor:pointer}
+.flame-breadcrumb button:hover{background:#334155}
+.flame-breadcrumb button.active{background:#2563eb;border-color:#2563eb;color:#fff}
+.flame-viewport{width:100%;overflow:auto;border:1px solid #1e293b;border-radius:8px;background:#0f172a;min-height:320px;max-height:560px}
+.flame-viewport svg{display:block;min-width:100%}
+.flame-tip{position:fixed;z-index:1000;pointer-events:none;background:#1e293b;border:1px solid #475569;color:#f8fafc;padding:8px 10px;border-radius:8px;font-size:.8125rem;box-shadow:0 8px 24px rgba(0,0,0,.35);display:none;max-width:420px;line-height:1.4}
+.flame-loading{color:#94a3b8;font-size:.875rem;padding:24px;text-align:center}
 </style>
 </head>
 <body>
@@ -80,6 +92,31 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
   </section>
 
   <section>
+    <h2>火焰图</h2>
+    <div class="flame-panel">
+      <div class="toolbar flame-toolbar">
+        <label>类型
+          <select id="flame-type">
+            <option value="heap">Heap（堆内存）</option>
+            <option value="cpu">CPU</option>
+            <option value="goroutine">Goroutine</option>
+            <option value="allocs">Allocs（累计分配）</option>
+            <option value="block">Block</option>
+            <option value="mutex">Mutex</option>
+          </select>
+        </label>
+        <label>CPU 采样秒数 <input type="number" id="flame-seconds" value="10" min="1" max="120"></label>
+        <button type="button" class="primary" id="btn-flame-load">加载火焰图</button>
+      </div>
+      <div class="flame-meta" id="flame-meta">选择类型后点击「加载火焰图」</div>
+      <div class="flame-breadcrumb" id="flame-breadcrumb"></div>
+      <div class="flame-viewport" id="flame-viewport">
+        <div class="flame-loading">尚未加载</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
     <h2>pprof 快捷入口</h2>
     <div class="toolbar">
       <label>CPU 采样秒数 <input type="number" id="cpu-seconds" value="30" min="1" max="300"></label>
@@ -101,6 +138,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
     </table>
   </section>
 </main>
+<div class="flame-tip" id="flame-tip"></div>
 <footer>ginshow · 单文件内嵌面板 · 无需外部 JS/CSS</footer>
 
 <script>
@@ -235,6 +273,208 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 
   $('btn-refresh').addEventListener('click', refresh);
   $('auto-refresh').addEventListener('change', schedule);
+
+  // ---- flame graph ----
+  const flameState = { root: null, unit: '', type: '', stack: [] };
+  const FLAME_H = 20;
+  const FLAME_W = 1100;
+
+  function fmtFlameValue(v, unit) {
+    if (unit === 'bytes') return fmtBytes(v);
+    if (unit === 'samples' || unit === 'contentions' || unit === 'goroutines') {
+      return v.toLocaleString() + ' ' + unit;
+    }
+    return String(v);
+  }
+
+  function flameColor(name) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    return 'hsl(' + (h % 360) + ' 48% 40%)';
+  }
+
+  function renderFlameBreadcrumb() {
+    const box = $('flame-breadcrumb');
+    box.innerHTML = '';
+    if (!flameState.root) return;
+
+    const items = [{ node: flameState.root, label: 'root' }].concat(
+      flameState.stack.map((n, i) => ({ node: n, label: n.name, idx: i }))
+    );
+
+    items.forEach((item, i) => {
+      const btn = document.createElement('button');
+      btn.textContent = item.label;
+      btn.className = i === items.length - 1 ? 'active' : '';
+      btn.addEventListener('click', () => {
+        flameState.stack = flameState.stack.slice(0, i);
+        drawFlame(currentFlameNode());
+      });
+      box.appendChild(btn);
+    });
+  }
+
+  function currentFlameNode() {
+    let node = flameState.root;
+    for (const n of flameState.stack) {
+      node = n;
+    }
+    return node;
+  }
+
+  function drawFlame(node) {
+    const viewport = $('flame-viewport');
+    viewport.innerHTML = '';
+
+    const children = (node && node.children) || [];
+    if (!children.length) {
+      viewport.innerHTML = '<div class="flame-loading">无采样数据</div>';
+      renderFlameBreadcrumb();
+      return;
+    }
+
+    let maxDepth = 0;
+    (function depth(n, d) {
+      maxDepth = Math.max(maxDepth, d);
+      (n.children || []).forEach(c => depth(c, d + 1));
+    })(node, 0);
+
+    const height = (maxDepth + 1) * FLAME_H + 8;
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', FLAME_W);
+    svg.setAttribute('height', height);
+    svg.setAttribute('viewBox', '0 0 ' + FLAME_W + ' ' + height);
+
+    const tip = $('flame-tip');
+
+    function addRect(n, x, y, w, clickable) {
+      if (w < 1) return;
+      const rect = document.createElementNS(svgNS, 'rect');
+      rect.setAttribute('x', x);
+      rect.setAttribute('y', y);
+      rect.setAttribute('width', Math.max(w - 1, 0));
+      rect.setAttribute('height', FLAME_H - 2);
+      rect.setAttribute('fill', flameColor(n.name));
+      rect.setAttribute('stroke', '#0f172a');
+      rect.setAttribute('stroke-width', '1');
+      rect.style.cursor = clickable ? 'pointer' : 'default';
+
+      rect.addEventListener('mouseenter', () => {
+        tip.style.display = 'block';
+        tip.innerHTML = '<strong>' + esc(n.name) + '</strong><br>' + fmtFlameValue(n.value, flameState.unit);
+      });
+      rect.addEventListener('mousemove', e => {
+        tip.style.left = (e.clientX + 12) + 'px';
+        tip.style.top = (e.clientY + 12) + 'px';
+      });
+      rect.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+
+      if (clickable) {
+        rect.addEventListener('click', () => {
+          flameState.stack.push(n);
+          drawFlame(n);
+        });
+      }
+
+      svg.appendChild(rect);
+
+      if (w > 54) {
+        const text = document.createElementNS(svgNS, 'text');
+        text.setAttribute('x', x + 4);
+        text.setAttribute('y', y + 14);
+        text.setAttribute('fill', '#f8fafc');
+        text.setAttribute('font-size', '11');
+        text.textContent = truncate(n.name, Math.floor(w / 7));
+        text.style.pointerEvents = 'none';
+        svg.appendChild(text);
+      }
+    }
+
+    function layoutChildren(nodes, x, y, w) {
+      let cx = x;
+      const total = nodes.reduce((s, n) => s + n.value, 0) || 1;
+      nodes.forEach(c => {
+        const cw = w * (c.value / total);
+        layout(c, cx, y, cw, true);
+        cx += cw;
+      });
+    }
+
+    function layout(n, x, y, w, clickable) {
+      addRect(n, x, y, w, clickable);
+      if (!n.children || !n.children.length) return;
+      let cx = x;
+      const total = n.value || 1;
+      n.children.forEach(c => {
+        const cw = w * (c.value / total);
+        layout(c, cx, y + FLAME_H, cw, true);
+        cx += cw;
+      });
+    }
+
+    if (node.name === 'root' && flameState.stack.length === 0) {
+      layoutChildren(node.children, 0, 4, FLAME_W);
+    } else {
+      layout(node, 0, 4, FLAME_W, false);
+    }
+
+    viewport.appendChild(svg);
+    renderFlameBreadcrumb();
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function truncate(s, n) {
+    s = String(s);
+    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+  }
+
+  async function loadFlame() {
+    const type = $('flame-type').value;
+    const seconds = Math.max(1, parseInt($('flame-seconds').value || '10', 10));
+    const viewport = $('flame-viewport');
+    const meta = $('flame-meta');
+    const btn = $('btn-flame-load');
+
+    btn.disabled = true;
+    meta.textContent = type === 'cpu'
+      ? 'CPU 采样中，请等待 ' + seconds + ' 秒…'
+      : '加载中…';
+    viewport.innerHTML = '<div class="flame-loading">' + meta.textContent + '</div>';
+
+    try {
+      const url = CFG.pprofPrefix + '/flame?type=' + encodeURIComponent(type) +
+        (type === 'cpu' ? '&seconds=' + seconds : '');
+      const res = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+
+      flameState.root = data.root;
+      flameState.unit = data.unit;
+      flameState.type = data.type;
+      flameState.stack = [];
+
+      meta.textContent = '类型: ' + data.type +
+        ' · 合计: ' + fmtFlameValue(data.total, data.unit) +
+        ' · 点击色块可下钻，面包屑可返回';
+
+      drawFlame(currentFlameNode());
+    } catch (e) {
+      meta.textContent = '加载失败';
+      viewport.innerHTML = '<div class="flame-loading" style="color:#fca5a5">' + esc(e.message) + '</div>';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  $('btn-flame-load').addEventListener('click', loadFlame);
+  $('flame-type').addEventListener('change', () => {
+    $('flame-seconds').disabled = $('flame-type').value !== 'cpu';
+  });
+  $('flame-seconds').disabled = $('flame-type').value !== 'cpu';
 
   renderLinks();
   refresh();

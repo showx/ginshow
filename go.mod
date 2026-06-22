@@ -2,7 +2,10 @@ module github.com/showx/ginshow
 
 go 1.25.0
 
-require github.com/gin-gonic/gin v1.12.0
+require (
+	github.com/gin-gonic/gin v1.12.0
+	github.com/google/pprof v0.0.0-20260604005048-7023385849c0
+)
 
 require (
 	github.com/bytedance/gopkg v0.1.3 // indirect

@@ -42,9 +42,9 @@ func main() {
 | `GET /__gs/x7f3a2c9/pprof/heap` | 堆内存 |
 | `GET /__gs/x7f3a2c9/pprof/goroutine` | Goroutine |
 | `GET /__gs/x7f3a2c9/pprof/trace` | 执行追踪 |
-| `GET /__gs/x7f3a2c9/metrics` | 运行时 JSON 指标 |
+| `GET /__gs/x7f3a2c9/pprof/flame` | 火焰图 JSON 数据（面板内可视化） |
 
-浏览器打开 **http://localhost:8080/__gs/x7f3a2c9** 即可查看可视化面板，无需额外静态资源。
+浏览器打开 **http://localhost:8080/__gs/x7f3a2c9**，在「火焰图」区域选择类型并加载即可交互查看（无需 `go tool pprof`）。
 
 > 默认路径刻意避开 `/debug` 等常见扫描目标。生产环境请**自定义路径**并启用 **Basic Auth**（见下方「安全建议」）。
 
@@ -135,11 +135,24 @@ ginshow.Attach(admin, ginshow.Production("admin", "secret"))
 
 - 概览卡片：Goroutine、内存、GC、请求统计
 - 内存详情表格
+- **火焰图**：Heap / CPU / Goroutine 等可视化，支持点击下钻与面包屑返回
 - pprof 快捷链接 + 可调 CPU 采样秒数
 - 每 3 秒自动刷新（可关闭）
 - 命令行参考（`go tool pprof` / `go tool trace`）
 
 生产环境启用 Basic Auth 后，浏览器访问面板路径会先弹出认证框，认证通过后面板与 API 均可正常使用。
+
+### 火焰图 API
+
+```bash
+# 堆内存火焰图（即时返回）
+curl "http://localhost:8080{BASE}/pprof/flame?type=heap"
+
+# CPU 火焰图（需等待采样，默认 10 秒，最大 120 秒）
+curl "http://localhost:8080{BASE}/pprof/flame?type=cpu&seconds=10"
+```
+
+支持 `type`：`cpu`、`heap`、`goroutine`、`allocs`、`block`、`mutex`。
 
 ## pprof 使用
 
