@@ -25,7 +25,7 @@ func Mount(r *gin.Engine, cfg Config) {
 }
 
 // Attach registers only debug endpoints on an existing router group.
-// Useful when you want middleware on the engine but debug routes under /admin/debug.
+// Useful when you want middleware on the engine but routes under a custom group.
 func Attach(group *gin.RouterGroup, cfg Config) {
 	cfg = cfg.withDefaults()
 	applyRuntimeProfiling(cfg)

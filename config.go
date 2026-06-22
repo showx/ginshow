@@ -4,21 +4,36 @@ import (
 	"time"
 )
 
+// DefaultBasePath is the default route prefix for ginshow endpoints.
+// It is intentionally non-obvious. Override DashboardPath, MetricsPath,
+// and PprofPrefix in production, and always combine with Auth in Production().
+const DefaultBasePath = "/__gs/x7f3a2c9"
+
 // Config controls profiling endpoints and request monitoring.
 type Config struct {
 	// EnablePprof exposes standard net/http/pprof handlers.
 	EnablePprof bool
 
 	// PprofPrefix is the route group prefix for pprof endpoints.
-	// Default: /debug/pprof
+	// Default: {DefaultBasePath}/pprof
 	PprofPrefix string
 
 	// EnableMetrics exposes runtime metrics as JSON.
 	EnableMetrics bool
 
 	// MetricsPath is the JSON metrics endpoint path.
-	// Default: /debug/metrics
+	// Default: {DefaultBasePath}/metrics
 	MetricsPath string
+
+	// EnableDashboard serves a single-file HTML monitoring UI.
+	EnableDashboard bool
+
+	// DashboardPath is the monitoring UI page path.
+	// Default: DefaultBasePath
+	DashboardPath string
+
+	// DashboardTitle is the page title shown in the UI header.
+	DashboardTitle string
 
 	// EnableMiddleware collects per-request stats and optional slow-request logs.
 	EnableMiddleware bool
@@ -49,9 +64,11 @@ type AuthConfig struct {
 func Default() Config {
 	return Config{
 		EnablePprof:          true,
-		PprofPrefix:          "/debug/pprof",
+		PprofPrefix:          DefaultBasePath + "/pprof",
 		EnableMetrics:        true,
-		MetricsPath:          "/debug/metrics",
+		MetricsPath:          DefaultBasePath + "/metrics",
+		EnableDashboard:      true,
+		DashboardPath:        DefaultBasePath,
 		EnableMiddleware:     true,
 		SlowRequestThreshold: 500 * time.Millisecond,
 	}
@@ -70,10 +87,13 @@ func Production(username, password string) Config {
 
 func (c Config) withDefaults() Config {
 	if c.PprofPrefix == "" {
-		c.PprofPrefix = "/debug/pprof"
+		c.PprofPrefix = DefaultBasePath + "/pprof"
 	}
 	if c.MetricsPath == "" {
-		c.MetricsPath = "/debug/metrics"
+		c.MetricsPath = DefaultBasePath + "/metrics"
+	}
+	if c.DashboardPath == "" {
+		c.DashboardPath = DefaultBasePath
 	}
 	return c
 }

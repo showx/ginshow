@@ -34,16 +34,25 @@ func debugGroup(r gin.IRouter, cfg Config) *gin.RouterGroup {
 }
 
 func registerDebugRoutes(r gin.IRouter, cfg Config) {
+	hasAuth := cfg.Auth != nil && cfg.Auth.Username != ""
+
 	if cfg.EnablePprof {
 		registerPprof(debugGroup(r, cfg))
 	}
 
 	if cfg.EnableMetrics {
-		metrics := metricsHandler()
-		if cfg.Auth != nil && cfg.Auth.Username != "" {
-			r.GET(cfg.MetricsPath, authMiddleware(cfg.Auth), metrics)
-			return
-		}
-		r.GET(cfg.MetricsPath, metrics)
+		registerGET(r, cfg.MetricsPath, hasAuth, cfg.Auth, metricsHandler())
 	}
+
+	if cfg.EnableDashboard {
+		registerGET(r, cfg.DashboardPath, hasAuth, cfg.Auth, dashboardHandler(cfg))
+	}
+}
+
+func registerGET(r gin.IRouter, path string, hasAuth bool, auth *AuthConfig, handler gin.HandlerFunc) {
+	if hasAuth {
+		r.GET(path, authMiddleware(auth), handler)
+		return
+	}
+	r.GET(path, handler)
 }

@@ -32,19 +32,25 @@ func main() {
 }
 ```
 
-启动后可用以下端点：
+启动后可用以下端点（默认前缀为 `ginshow.DefaultBasePath`，即 `/__gs/x7f3a2c9`）：
 
 | 端点 | 说明 |
 |------|------|
-| `GET /debug/pprof/` | pprof 索引页 |
-| `GET /debug/pprof/profile` | CPU 采样 |
-| `GET /debug/pprof/heap` | 堆内存 |
-| `GET /debug/pprof/goroutine` | Goroutine |
-| `GET /debug/pprof/trace` | 执行追踪 |
-| `GET /debug/metrics` | 运行时 JSON 指标 |
+| `GET /__gs/x7f3a2c9` | **监控面板**（单文件内嵌 UI，自动刷新） |
+| `GET /__gs/x7f3a2c9/pprof/` | pprof 索引页 |
+| `GET /__gs/x7f3a2c9/pprof/profile` | CPU 采样 |
+| `GET /__gs/x7f3a2c9/pprof/heap` | 堆内存 |
+| `GET /__gs/x7f3a2c9/pprof/goroutine` | Goroutine |
+| `GET /__gs/x7f3a2c9/pprof/trace` | 执行追踪 |
+| `GET /__gs/x7f3a2c9/metrics` | 运行时 JSON 指标 |
+
+浏览器打开 **http://localhost:8080/__gs/x7f3a2c9** 即可查看可视化面板，无需额外静态资源。
+
+> 默认路径刻意避开 `/debug` 等常见扫描目标。生产环境请**自定义路径**并启用 **Basic Auth**（见下方「安全建议」）。
 
 ## 功能
 
+- **内嵌监控面板** — 单 HTML 文件（CSS/JS 内联），Go `embed` 加载，零外部依赖
 - **pprof 集成** — 标准 `net/http/pprof` 端点，支持 CPU、heap、goroutine、mutex、block、trace
 - **运行时指标** — 内存、GC、goroutine 数量及请求统计，JSON 格式便于对接监控
 - **请求监控** — 自动统计 QPS、平均延迟、慢请求；debug 路由不计入统计
@@ -60,10 +66,36 @@ ginshow.Mount(r, ginshow.Default())
 
 默认行为：
 
-- 开启 pprof（前缀 `/debug/pprof`）
-- 开启 metrics（路径 `/debug/metrics`）
+- 开启 pprof（前缀 `/__gs/x7f3a2c9/pprof`）
+- 开启 metrics（路径 `/__gs/x7f3a2c9/metrics`）
 - 开启请求监控中间件
 - 慢请求阈值 500ms
+- 监控面板路径 `/__gs/x7f3a2c9`
+
+### 安全建议
+
+生产环境至少做到：
+
+1. **自定义路径** — 不要使用默认前缀，改成仅团队知晓的随机路径
+2. **启用认证** — 使用 `Production(user, pass)` 开启 Basic Auth
+3. **网络隔离** — 如有条件，仅内网或 VPN 可访问
+
+```go
+base := "/your-random-path-a8k2m9" // 自行生成，勿提交到公开仓库
+cfg := ginshow.Production("admin", os.Getenv("GINSHOW_PASS"))
+cfg.DashboardPath = base
+cfg.MetricsPath = base + "/metrics"
+cfg.PprofPrefix = base + "/pprof"
+ginshow.Mount(r, cfg)
+```
+
+### 关闭面板
+
+```go
+cfg := ginshow.Default()
+cfg.EnableDashboard = false
+ginshow.Mount(r, cfg)
+```
 
 ### 生产环境
 
@@ -77,9 +109,11 @@ ginshow.Mount(r, ginshow.Production("admin", "your-secret"))
 
 ```go
 cfg := ginshow.Default()
-cfg.PprofPrefix = "/internal/pprof"
-cfg.MetricsPath = "/internal/metrics"
+cfg.PprofPrefix = "/your-path/pprof"
+cfg.MetricsPath = "/your-path/metrics"
 cfg.SlowRequestThreshold = 200 * time.Millisecond
+cfg.DashboardPath = "/your-path"
+cfg.DashboardTitle = "My App Monitor"
 cfg.BlockProfileRate = 1           // 开启 block profiling
 cfg.MutexProfileFraction = 1       // 开启 mutex profiling
 ginshow.Mount(r, cfg)
@@ -92,36 +126,50 @@ ginshow.Mount(r, cfg)
 ```go
 admin := r.Group("/admin")
 ginshow.Attach(admin, ginshow.Production("admin", "secret"))
-// 实际路径: /admin/debug/pprof/*, /admin/debug/metrics
+// 实际路径: /admin/__gs/x7f3a2c9/pprof/* 等（取决于 Config 中的路径配置）
 ```
+
+## 监控面板
+
+面板由 `dashboard.html` 单文件构成，通过 Go `embed` 嵌入并在运行时渲染，特点：
+
+- 概览卡片：Goroutine、内存、GC、请求统计
+- 内存详情表格
+- pprof 快捷链接 + 可调 CPU 采样秒数
+- 每 3 秒自动刷新（可关闭）
+- 命令行参考（`go tool pprof` / `go tool trace`）
+
+生产环境启用 Basic Auth 后，浏览器访问面板路径会先弹出认证框，认证通过后面板与 API 均可正常使用。
 
 ## pprof 使用
 
+将 `{BASE}` 替换为你的实际路径前缀（默认 `/__gs/x7f3a2c9`）：
+
 ```bash
 # CPU 采样 30 秒
-go tool pprof http://localhost:8080/debug/pprof/profile?seconds=30
+go tool pprof http://localhost:8080{BASE}/pprof/profile?seconds=30
 
 # 堆内存分析
-go tool pprof http://localhost:8080/debug/pprof/heap
+go tool pprof http://localhost:8080{BASE}/pprof/heap
 
 # Goroutine 分析
-go tool pprof http://localhost:8080/debug/pprof/goroutine
+go tool pprof http://localhost:8080{BASE}/pprof/goroutine
 
 # 执行追踪（5 秒）
-wget -O trace.out "http://localhost:8080/debug/pprof/trace?seconds=5"
+wget -O trace.out "http://localhost:8080{BASE}/pprof/trace?seconds=5"
 go tool trace trace.out
 ```
 
 生产环境需携带认证：
 
 ```bash
-go tool pprof -http=:8081 http://admin:your-secret@localhost:8080/debug/pprof/heap
+go tool pprof -http=:8081 http://admin:your-secret@localhost:8080{BASE}/pprof/heap
 ```
 
 ## 运行时指标
 
 ```bash
-curl http://localhost:8080/debug/metrics
+curl http://localhost:8080{BASE}/metrics
 ```
 
 响应示例：
@@ -162,6 +210,7 @@ data, err := ginshow.MetricsJSON()
 |------|------|
 | `Mount(r, cfg)` | 注册 debug 端点并启用中间件 |
 | `Attach(group, cfg)` | 仅在路由组上注册 debug 端点 |
+| `DefaultBasePath` | 默认路由前缀常量（`/__gs/x7f3a2c9`） |
 | `Default()` | 返回开发环境默认配置 |
 | `Production(user, pass)` | 返回带 Basic Auth 的生产配置 |
 | `Middleware(cfg)` | 单独使用请求监控中间件 |

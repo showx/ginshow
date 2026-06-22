@@ -2,7 +2,6 @@ package ginshow
 
 import (
 	"log"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +18,7 @@ func Middleware(cfg Config) gin.HandlerFunc {
 		}
 
 		path := c.Request.URL.Path
-		if strings.HasPrefix(path, cfg.PprofPrefix) || path == cfg.MetricsPath {
+		if isInternalDebugPath(path, cfg) {
 			c.Next()
 			return
 		}

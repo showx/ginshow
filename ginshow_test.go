@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,9 +23,10 @@ func TestMountRegistersDebugEndpoints(t *testing.T) {
 	tests := []struct {
 		path string
 	}{
-		{"/debug/pprof/"},
-		{"/debug/pprof/heap"},
-		{"/debug/metrics"},
+		{cfg.DashboardPath},
+		{cfg.PprofPrefix + "/"},
+		{cfg.PprofPrefix + "/heap"},
+		{cfg.MetricsPath},
 	}
 
 	for _, tt := range tests {
@@ -66,7 +68,7 @@ func TestMiddlewareSkipsDebugRoutes(t *testing.T) {
 	cfg.SlowRequestThreshold = time.Millisecond
 	ginshow.Mount(r, cfg)
 
-	req := httptest.NewRequest(http.MethodGet, "/debug/metrics", nil)
+	req := httptest.NewRequest(http.MethodGet, cfg.MetricsPath, nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -91,6 +93,32 @@ func TestMiddlewareSkipsDebugRoutes(t *testing.T) {
 	}
 }
 
+func TestDashboardContainsEmbeddedUI(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
+	cfg := ginshow.Default()
+	cfg.EnableMiddleware = false
+	ginshow.Mount(r, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, cfg.DashboardPath, nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Fatalf("unexpected content type: %s", ct)
+	}
+	body := rec.Body.String()
+	for _, needle := range []string{"ginshow", "pprof 快捷入口", "const CFG =", "metricsPath"} {
+		if !strings.Contains(body, needle) {
+			t.Fatalf("dashboard missing %q", needle)
+		}
+	}
+}
+
 func TestProductionAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -99,7 +127,7 @@ func TestProductionAuth(t *testing.T) {
 	cfg.EnableMiddleware = false
 	ginshow.Mount(r, cfg)
 
-	req := httptest.NewRequest(http.MethodGet, "/debug/metrics", nil)
+	req := httptest.NewRequest(http.MethodGet, cfg.MetricsPath, nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 

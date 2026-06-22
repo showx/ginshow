@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#0b1120;color:#e2e8f0;line-height:1.5;min-height:100vh}
+a{color:#60a5fa;text-decoration:none}
+a:hover{text-decoration:underline}
+header{padding:20px 24px;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;background:#0f172a}
+header h1{font-size:1.25rem;font-weight:600;color:#f8fafc}
+header .meta{font-size:.875rem;color:#94a3b8;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:#14532d;color:#86efac;font-size:.75rem}
+.badge.err{background:#450a0a;color:#fca5a5}
+.dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite}
+.dot.err{background:#ef4444;animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+main{padding:24px;max-width:1280px;margin:0 auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.card{background:#111827;border:1px solid #1e293b;border-radius:12px;padding:16px 18px}
+.card .label{font-size:.75rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.card .value{font-size:1.5rem;font-weight:700;color:#f1f5f9;font-variant-numeric:tabular-nums}
+.card .sub{font-size:.75rem;color:#64748b;margin-top:4px}
+section{margin-bottom:28px}
+section h2{font-size:1rem;font-weight:600;color:#cbd5e1;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #1e293b}
+table{width:100%;border-collapse:collapse;background:#111827;border:1px solid #1e293b;border-radius:12px;overflow:hidden}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid #1e293b;font-size:.875rem}
+th{background:#0f172a;color:#94a3b8;font-weight:500;width:40%}
+td{color:#e2e8f0;font-variant-numeric:tabular-nums}
+tr:last-child td,tr:last-child th{border-bottom:none}
+.links{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.link-card{display:block;background:#111827;border:1px solid #1e293b;border-radius:12px;padding:14px 16px;transition:border-color .15s,background .15s}
+.link-card:hover{border-color:#3b82f6;background:#172554;text-decoration:none}
+.link-card strong{display:block;color:#f1f5f9;margin-bottom:4px;font-size:.9375rem}
+.link-card span{color:#94a3b8;font-size:.8125rem}
+.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.toolbar label{font-size:.875rem;color:#94a3b8;display:flex;align-items:center;gap:8px}
+.toolbar input[type=number]{width:72px;padding:6px 8px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0}
+.toolbar button,.toolbar a.btn{padding:8px 14px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;font-size:.875rem;cursor:pointer;text-decoration:none;display:inline-block}
+.toolbar button:hover,.toolbar a.btn:hover{background:#334155;text-decoration:none}
+.toolbar button.primary{background:#2563eb;border-color:#2563eb;color:#fff}
+.toolbar button.primary:hover{background:#1d4ed8}
+.alert{padding:12px 16px;border-radius:10px;background:#450a0a;border:1px solid #7f1d1d;color:#fecaca;margin-bottom:16px;font-size:.875rem;display:none}
+.alert.show{display:block}
+footer{padding:16px 24px;text-align:center;color:#475569;font-size:.75rem;border-top:1px solid #1e293b}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.8125rem;background:#1e293b;padding:2px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>{{.Title}}</h1>
+  <div class="meta">
+    <span id="go-version">—</span>
+    <span id="updated">—</span>
+    <span class="badge" id="status-badge"><span class="dot" id="status-dot"></span><span id="status-text">连接中</span></span>
+  </div>
+</header>
+<main>
+  <div class="alert" id="error-box"></div>
+
+  <section>
+    <h2>概览</h2>
+    <div class="grid" id="overview-grid">
+      <div class="card"><div class="label">Goroutines</div><div class="value" id="v-goroutines">—</div></div>
+      <div class="card"><div class="label">Heap 使用</div><div class="value" id="v-heap">—</div><div class="sub" id="v-heap-sub"></div></div>
+      <div class="card"><div class="label">系统内存</div><div class="value" id="v-sys">—</div></div>
+      <div class="card"><div class="label">GC 次数</div><div class="value" id="v-gc">—</div><div class="sub" id="v-gc-sub"></div></div>
+      <div class="card"><div class="label">总请求</div><div class="value" id="v-req-total">—</div><div class="sub" id="v-req-sub"></div></div>
+      <div class="card"><div class="label">进行中</div><div class="value" id="v-inflight">—</div></div>
+      <div class="card"><div class="label">慢请求</div><div class="value" id="v-slow">—</div></div>
+      <div class="card"><div class="label">平均延迟</div><div class="value" id="v-latency">—</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>内存详情</h2>
+    <table><tbody id="memory-table"></tbody></table>
+  </section>
+
+  <section>
+    <h2>pprof 快捷入口</h2>
+    <div class="toolbar">
+      <label>CPU 采样秒数 <input type="number" id="cpu-seconds" value="30" min="1" max="300"></label>
+      <a class="btn primary" id="btn-cpu" href="#">下载 CPU Profile</a>
+      <button type="button" id="btn-refresh">立即刷新</button>
+      <label><input type="checkbox" id="auto-refresh" checked> 自动刷新 (3s)</label>
+    </div>
+    <div class="links" id="pprof-links"></div>
+  </section>
+
+  <section>
+    <h2>命令行参考</h2>
+    <table>
+      <tbody>
+        <tr><th>CPU</th><td><code id="cmd-cpu">go tool pprof</code></td></tr>
+        <tr><th>Heap</th><td><code id="cmd-heap">go tool pprof</code></td></tr>
+        <tr><th>Trace</th><td><code id="cmd-trace">go tool trace</code></td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+<footer>ginshow · 单文件内嵌面板 · 无需外部 JS/CSS</footer>
+
+<script>
+(function(){
+  const CFG = {{.ConfigJSON}};
+
+  const $ = id => document.getElementById(id);
+
+  function fmtBytes(n) {
+    if (n == null || isNaN(n)) return '—';
+    const u = ['B','KB','MB','GB','TB'];
+    let i = 0, v = Number(n);
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return v.toFixed(i ? 1 : 0) + ' ' + u[i];
+  }
+
+  function fmtNs(ns) {
+    if (!ns) return '0 ms';
+    const ms = ns / 1e6;
+    return ms >= 1 ? ms.toFixed(2) + ' ms' : (ns / 1e3).toFixed(0) + ' µs';
+  }
+
+  function setStatus(ok, msg) {
+    $('status-text').textContent = msg;
+    $('status-dot').classList.toggle('err', !ok);
+    $('status-badge').classList.toggle('err', !ok);
+  }
+
+  function showError(msg) {
+    const box = $('error-box');
+    if (!msg) { box.classList.remove('show'); box.textContent = ''; return; }
+    box.textContent = msg;
+    box.classList.add('show');
+  }
+
+  const pprofItems = [
+    { name: 'pprof 索引', path: '/', desc: '标准 pprof 导航页' },
+    { name: 'Heap', path: '/heap', desc: '堆内存分配采样' },
+    { name: 'Goroutine', path: '/goroutine', desc: '协程栈信息' },
+    { name: 'Allocs', path: '/allocs', desc: '累计分配对象' },
+    { name: 'Block', path: '/block', desc: '阻塞分析' },
+    { name: 'Mutex', path: '/mutex', desc: '互斥锁竞争' },
+    { name: 'ThreadCreate', path: '/threadcreate', desc: '线程创建' },
+    { name: 'Trace', path: '/trace?seconds=5', desc: '5 秒执行追踪' },
+    { name: 'Metrics JSON', path: null, desc: '原始指标 API', external: CFG.metricsPath }
+  ];
+
+  function renderLinks() {
+    const box = $('pprof-links');
+    box.innerHTML = '';
+    pprofItems.forEach(item => {
+      const a = document.createElement('a');
+      a.className = 'link-card';
+      const href = item.external || (CFG.pprofPrefix + (item.path || '/'));
+      a.href = href;
+      if (item.path && item.path.indexOf('trace') === 0) a.target = '_blank';
+      a.innerHTML = '<strong>' + item.name + '</strong><span>' + item.desc + '</span>';
+      box.appendChild(a);
+    });
+
+    const sec = $('cpu-seconds');
+    const updateCpu = () => {
+      const s = Math.max(1, parseInt(sec.value || '30', 10));
+      $('btn-cpu').href = CFG.pprofPrefix + '/profile?seconds=' + s;
+    };
+    sec.addEventListener('input', updateCpu);
+    updateCpu();
+
+    const origin = location.origin;
+    $('cmd-cpu').textContent = 'go tool pprof ' + origin + CFG.pprofPrefix + '/profile?seconds=30';
+    $('cmd-heap').textContent = 'go tool pprof ' + origin + CFG.pprofPrefix + '/heap';
+    $('cmd-trace').textContent = 'wget -O trace.out "' + origin + CFG.pprofPrefix + '/trace?seconds=5" && go tool trace trace.out';
+  }
+
+  function renderMemory(m) {
+    const rows = [
+      ['当前分配 (alloc)', fmtBytes(m.alloc_bytes)],
+      ['累计分配 (total_alloc)', fmtBytes(m.total_alloc_bytes)],
+      ['系统占用 (sys)', fmtBytes(m.sys_bytes)],
+      ['堆分配 (heap_alloc)', fmtBytes(m.heap_alloc_bytes)],
+      ['堆系统 (heap_sys)', fmtBytes(m.heap_sys_bytes)],
+      ['堆使用中 (heap_inuse)', fmtBytes(m.heap_inuse_bytes)],
+      ['堆空闲 (heap_idle)', fmtBytes(m.heap_idle_bytes)],
+      ['堆归还 (heap_released)', fmtBytes(m.heap_released_bytes)],
+      ['栈使用中 (stack_inuse)', fmtBytes(m.stack_inuse_bytes)],
+      ['栈系统 (stack_sys)', fmtBytes(m.stack_sys_bytes)]
+    ];
+    $('memory-table').innerHTML = rows.map(r => '<tr><th>' + r[0] + '</th><td>' + r[1] + '</td></tr>').join('');
+  }
+
+  function render(data) {
+    $('go-version').textContent = data.go_version || '—';
+    $('updated').textContent = '更新: ' + (data.timestamp || '—');
+
+    $('v-goroutines').textContent = data.num_goroutine ?? '—';
+    $('v-heap').textContent = fmtBytes(data.memory && data.memory.heap_alloc_bytes);
+    $('v-heap-sub').textContent = 'alloc ' + fmtBytes(data.memory && data.memory.alloc_bytes);
+    $('v-sys').textContent = fmtBytes(data.memory && data.memory.sys_bytes);
+
+    const gc = data.gc || {};
+    $('v-gc').textContent = gc.num_gc ?? '—';
+    $('v-gc-sub').textContent = 'CPU ' + ((gc.gc_cpu_fraction || 0) * 100).toFixed(2) + '% · 最近暂停 ' + fmtNs(gc.last_pause_ns);
+
+    const req = data.requests || {};
+    $('v-req-total').textContent = req.total_requests ?? '—';
+    $('v-req-sub').textContent = '运行 ' + (req.uptime || '—');
+    $('v-inflight').textContent = req.in_flight ?? '—';
+    $('v-slow').textContent = req.slow_requests ?? '—';
+    $('v-latency').textContent = (req.avg_latency_ms != null ? req.avg_latency_ms.toFixed(2) + ' ms' : '—');
+
+    renderMemory(data.memory || {});
+    setStatus(true, '已连接');
+    showError('');
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch(CFG.metricsPath, { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      render(await res.json());
+    } catch (e) {
+      setStatus(false, '连接失败');
+      showError('无法加载指标: ' + e.message + '（若启用了 Basic Auth，请确保已登录）');
+    }
+  }
+
+  let timer = null;
+  function schedule() {
+    if (timer) clearInterval(timer);
+    if ($('auto-refresh').checked) timer = setInterval(refresh, 3000);
+  }
+
+  $('btn-refresh').addEventListener('click', refresh);
+  $('auto-refresh').addEventListener('change', schedule);
+
+  renderLinks();
+  refresh();
+  schedule();
+})();
+</script>
+</body>
+</html>
