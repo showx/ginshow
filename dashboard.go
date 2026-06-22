@@ -24,6 +24,7 @@ var (
 type dashboardPage struct {
 	Title       string
 	ConfigJSON  template.JS
+	RequireAuth bool
 }
 
 func loadDashboardTemplate() (*template.Template, error) {
@@ -41,9 +42,10 @@ func dashboardHandler(cfg Config) gin.HandlerFunc {
 			return
 		}
 
-		configJSON, err := json.Marshal(map[string]string{
+		configJSON, err := json.Marshal(map[string]any{
 			"metricsPath": cfg.MetricsPath,
 			"pprofPrefix": cfg.PprofPrefix,
+			"requireAuth": cfg.Auth != nil && cfg.Auth.Username != "",
 		})
 		if err != nil {
 			c.String(http.StatusInternalServerError, "dashboard config error: %v", err)
@@ -56,9 +58,11 @@ func dashboardHandler(cfg Config) gin.HandlerFunc {
 		}
 
 		var buf bytes.Buffer
+		requireAuth := cfg.Auth != nil && cfg.Auth.Username != ""
 		if err := tmpl.Execute(&buf, dashboardPage{
-			Title:      title,
-			ConfigJSON: template.JS(configJSON),
+			Title:       title,
+			ConfigJSON:  template.JS(configJSON),
+			RequireAuth: requireAuth,
 		}); err != nil {
 			c.String(http.StatusInternalServerError, "dashboard render error: %v", err)
 			return

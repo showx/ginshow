@@ -167,8 +167,18 @@ func TestProductionAuth(t *testing.T) {
 	cfg.EnableMiddleware = false
 	ginshow.Mount(r, cfg)
 
-	req := httptest.NewRequest(http.MethodGet, cfg.MetricsPath, nil)
+	req := httptest.NewRequest(http.MethodGet, cfg.DashboardPath, nil)
 	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dashboard expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "登录监控面板") {
+		t.Fatalf("dashboard should contain login page")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, cfg.MetricsPath, nil)
+	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {

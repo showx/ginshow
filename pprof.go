@@ -46,7 +46,8 @@ func registerDebugRoutes(r gin.IRouter, cfg Config) {
 	}
 
 	if cfg.EnableDashboard {
-		registerGET(r, cfg.DashboardPath, hasAuth, cfg.Auth, dashboardHandler(cfg))
+		// Dashboard HTML is public; login form + API Basic Auth protect access.
+		r.GET(cfg.DashboardPath, dashboardHandler(cfg))
 	}
 }
 

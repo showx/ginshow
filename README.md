@@ -14,6 +14,8 @@ go get github.com/showx/ginshow
 package main
 
 import (
+	"os"
+
 	"github.com/gin-gonic/gin"
 	"github.com/showx/ginshow"
 )
@@ -21,15 +23,33 @@ import (
 func main() {
 	r := gin.Default()
 
-	// 一行接入
-	ginshow.Mount(r, ginshow.Default())
-
-	r.GET("/api/hello", func(c *gin.Context) {
-		c.JSON(200, gin.H{"message": "hello"})
-	})
+	// 推荐：启用账号密码保护（面板内置登录页 + API Basic Auth）
+	user := os.Getenv("GINSHOW_USER")
+	if user == "" {
+		user = "admin"
+	}
+	pass := os.Getenv("GINSHOW_PASS")
+	if pass == "" {
+		pass = "ginshow"
+	}
+	ginshow.Mount(r, ginshow.Production(user, pass))
 
 	r.Run(":8080")
 }
+```
+
+运行示例：
+
+```bash
+go run ./example/
+# 默认账号 admin / 密码 ginshow
+# 打开 http://localhost:8080/__gs/x7f3a2c9 在登录页输入账号密码
+```
+
+本地开发若不需要登录，可使用无认证配置：
+
+```go
+ginshow.Mount(r, ginshow.Default())
 ```
 
 启动后可用以下端点（默认前缀为 `ginshow.DefaultBasePath`，即 `/__gs/x7f3a2c9`）：
@@ -54,6 +74,7 @@ func main() {
 - **pprof 集成** — 标准 `net/http/pprof` 端点，支持 CPU、heap、goroutine、mutex、block、trace
 - **运行时指标** — 内存、GC、goroutine 数量及请求统计，JSON 格式便于对接监控
 - **请求监控** — 自动统计 QPS、平均延迟、慢请求；debug 路由不计入统计
+- **账号密码登录** — `Production()` 启用后面板显示登录页，metrics / pprof / 火焰图 API 需认证
 - **生产环境保护** — 内置 Basic Auth，一行切换生产配置
 
 ## 配置
@@ -97,13 +118,15 @@ cfg.EnableDashboard = false
 ginshow.Mount(r, cfg)
 ```
 
-### 生产环境
+### 生产环境（推荐）
 
 ```go
-ginshow.Mount(r, ginshow.Production("admin", "your-secret"))
+ginshow.Mount(r, ginshow.Production("admin", os.Getenv("GINSHOW_PASS")))
 ```
 
-所有 debug 端点将启用 HTTP Basic Auth 保护。
+- 面板：打开后先显示**登录页**（非浏览器弹窗），登录成功后加载数据
+- API：`/metrics`、`/pprof/*`、`/flame` 等接口仍受 HTTP Basic Auth 保护
+- 命令行访问 pprof 需携带认证：`http://user:pass@host/.../pprof/heap`
 
 ### 自定义配置
 
@@ -136,11 +159,12 @@ ginshow.Attach(admin, ginshow.Production("admin", "secret"))
 - 概览卡片：Goroutine、内存、GC、请求统计
 - 内存详情表格
 - **火焰图**：Heap / CPU / Goroutine 等可视化，支持点击下钻与面包屑返回
+- **登录页**：启用认证时先登录再访问数据，支持退出登录
 - pprof 快捷链接 + 可调 CPU 采样秒数
 - 每 3 秒自动刷新（可关闭）
 - 命令行参考（`go tool pprof` / `go tool trace`）
 
-生产环境启用 Basic Auth 后，浏览器访问面板路径会先弹出认证框，认证通过后面板与 API 均可正常使用。
+生产环境启用 Basic Auth 后，浏览器打开面板会先进入登录页；登录成功后指标、火焰图等请求会自动携带凭证。
 
 ### 火焰图 API
 

@@ -58,15 +58,50 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 .flame-viewport svg{display:block;min-width:100%}
 .flame-tip{position:fixed;z-index:1000;pointer-events:none;background:#1e293b;border:1px solid #475569;color:#f8fafc;padding:8px 10px;border-radius:8px;font-size:.8125rem;box-shadow:0 8px 24px rgba(0,0,0,.35);display:none;max-width:420px;line-height:1.4}
 .flame-loading{color:#94a3b8;font-size:.875rem;padding:24px;text-align:center}
+.login-screen{position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;background:rgba(2,6,23,.92);padding:24px}
+.login-screen.hidden{display:none}
+.login-card{width:100%;max-width:400px;background:#111827;border:1px solid #1e293b;border-radius:16px;padding:28px 24px;box-shadow:0 20px 50px rgba(0,0,0,.45)}
+.login-card h2{font-size:1.25rem;color:#f8fafc;margin-bottom:8px}
+.login-card p{font-size:.875rem;color:#94a3b8;margin-bottom:20px}
+.login-field{margin-bottom:14px}
+.login-field label{display:block;font-size:.8125rem;color:#94a3b8;margin-bottom:6px}
+.login-field input{width:100%;padding:10px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#f8fafc;font-size:.9375rem}
+.login-field input:focus{outline:none;border-color:#3b82f6}
+.login-error{min-height:1.25rem;color:#fca5a5;font-size:.8125rem;margin-bottom:12px}
+.login-submit{width:100%;padding:10px 14px;border:none;border-radius:8px;background:#2563eb;color:#fff;font-size:.9375rem;font-weight:600;cursor:pointer}
+.login-submit:hover{background:#1d4ed8}
+.login-submit:disabled{opacity:.6;cursor:not-allowed}
+.app-shell.hidden{display:none}
+.btn-logout{padding:6px 12px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#cbd5e1;font-size:.8125rem;cursor:pointer}
+.btn-logout:hover{background:#334155}
 </style>
 </head>
 <body>
+<div id="login-screen" class="login-screen{{if not .RequireAuth}} hidden{{end}}">
+  <form class="login-card" id="login-form">
+    <h2>登录监控面板</h2>
+    <p>请输入账号密码以访问运行时指标、pprof 与火焰图。</p>
+    <div class="login-field">
+      <label for="login-user">账号</label>
+      <input id="login-user" name="username" type="text" autocomplete="username" required>
+    </div>
+    <div class="login-field">
+      <label for="login-pass">密码</label>
+      <input id="login-pass" name="password" type="password" autocomplete="current-password" required>
+    </div>
+    <div class="login-error" id="login-error"></div>
+    <button type="submit" class="login-submit" id="login-submit">登录</button>
+  </form>
+</div>
+
+<div id="app-shell" class="app-shell{{if .RequireAuth}} hidden{{end}}">
 <header>
   <h1>{{.Title}}</h1>
   <div class="meta">
     <span id="go-version">—</span>
     <span id="updated">—</span>
     <span class="badge" id="status-badge"><span class="dot" id="status-dot"></span><span id="status-text">连接中</span></span>
+    <button type="button" class="btn-logout hidden" id="btn-logout">退出登录</button>
   </div>
 </header>
 <main>
@@ -140,12 +175,119 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 </main>
 <div class="flame-tip" id="flame-tip"></div>
 <footer>ginshow · 单文件内嵌面板 · 无需外部 JS/CSS</footer>
+</div>
 
 <script>
 (function(){
   const CFG = {{.ConfigJSON}};
+  const AUTH_KEY = 'ginshow_auth';
 
   const $ = id => document.getElementById(id);
+
+  function getAuth() {
+    if (!CFG.requireAuth) return null;
+    try {
+      const raw = sessionStorage.getItem(AUTH_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  }
+
+  function authHeader() {
+    const a = getAuth();
+    if (!a) return {};
+    return { Authorization: 'Basic ' + btoa(unescape(encodeURIComponent(a.username + ':' + a.password))) };
+  }
+
+  async function fetchAuth(url, opts) {
+    opts = opts || {};
+    opts.cache = 'no-store';
+    opts.headers = Object.assign({}, opts.headers, authHeader());
+    const res = await fetch(url, opts);
+    if (CFG.requireAuth && res.status === 401) {
+      clearAuth();
+      showLogin('登录已过期，请重新登录');
+      throw new Error('未授权');
+    }
+    return res;
+  }
+
+  function clearAuth() {
+    sessionStorage.removeItem(AUTH_KEY);
+  }
+
+  function showLogin(msg) {
+    if (timer) clearInterval(timer);
+    $('app-shell').classList.add('hidden');
+    $('login-screen').classList.remove('hidden');
+    $('login-error').textContent = msg || '';
+    $('btn-logout').classList.add('hidden');
+  }
+
+  function showApp() {
+    $('login-screen').classList.add('hidden');
+    $('app-shell').classList.remove('hidden');
+    if (CFG.requireAuth) $('btn-logout').classList.remove('hidden');
+  }
+
+  async function verifyLogin(username, password) {
+    sessionStorage.setItem(AUTH_KEY, JSON.stringify({ username, password }));
+    const res = await fetch(CFG.metricsPath, { cache: 'no-store', headers: authHeader() });
+    if (!res.ok) {
+      clearAuth();
+      throw new Error('账号或密码错误');
+    }
+    return res.json();
+  }
+
+  async function bootstrap() {
+    if (!CFG.requireAuth) {
+      showApp();
+      renderLinks();
+      refresh();
+      schedule();
+      return;
+    }
+
+    showLogin('');
+    const auth = getAuth();
+    if (auth) {
+      try {
+        const data = await verifyLogin(auth.username, auth.password);
+        showApp();
+        renderLinks();
+        render(data);
+        setStatus(true, '已连接');
+        schedule();
+        return;
+      } catch {
+        showLogin('登录已过期，请重新登录');
+      }
+    }
+  }
+
+  $('login-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    $('login-error').textContent = '';
+    $('login-submit').disabled = true;
+    try {
+      const data = await verifyLogin($('login-user').value, $('login-pass').value);
+      showApp();
+      renderLinks();
+      render(data);
+      schedule();
+    } catch (err) {
+      $('login-error').textContent = err.message || '登录失败';
+    } finally {
+      $('login-submit').disabled = false;
+    }
+  });
+
+  $('btn-logout').addEventListener('click', () => {
+    clearAuth();
+    $('login-user').value = '';
+    $('login-pass').value = '';
+    showLogin('');
+  });
 
   function fmtBytes(n) {
     if (n == null || isNaN(n)) return '—';
@@ -256,12 +398,13 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 
   async function refresh() {
     try {
-      const res = await fetch(CFG.metricsPath, { cache: 'no-store', credentials: 'same-origin' });
+      const res = await fetchAuth(CFG.metricsPath);
       if (!res.ok) throw new Error('HTTP ' + res.status);
       render(await res.json());
     } catch (e) {
+      if (e.message === '未授权') return;
       setStatus(false, '连接失败');
-      showError('无法加载指标: ' + e.message + '（若启用了 Basic Auth，请确保已登录）');
+      showError('无法加载指标: ' + e.message);
     }
   }
 
@@ -448,7 +591,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
     try {
       const url = CFG.pprofPrefix + '/flame?type=' + encodeURIComponent(type) +
         (type === 'cpu' ? '&seconds=' + seconds : '');
-      const res = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
+      const res = await fetchAuth(url);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
 
@@ -463,6 +606,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 
       drawFlame(currentFlameNode());
     } catch (e) {
+      if (e.message === '未授权') return;
       meta.textContent = '加载失败';
       viewport.innerHTML = '<div class="flame-loading" style="color:#fca5a5">' + esc(e.message) + '</div>';
     } finally {
@@ -477,8 +621,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
   $('flame-seconds').disabled = $('flame-type').value !== 'cpu';
 
   renderLinks();
-  refresh();
-  schedule();
+  bootstrap();
 })();
 </script>
 </body>
