@@ -52,6 +52,12 @@ type Config struct {
 	// MutexProfileFraction enables mutex profiling when > 0.
 	// See runtime.SetMutexProfileFraction.
 	MutexProfileFraction int
+
+	// Health configures /healthz and /readyz probes.
+	Health HealthConfig
+
+	// Prometheus configures Prometheus metrics exposition.
+	Prometheus PrometheusConfig
 }
 
 // AuthConfig protects debug routes with HTTP Basic Auth.
@@ -71,6 +77,8 @@ func Default() Config {
 		DashboardPath:        DefaultBasePath,
 		EnableMiddleware:     true,
 		SlowRequestThreshold: 500 * time.Millisecond,
+		Health:               DefaultHealth(),
+		Prometheus:           DefaultPrometheus(),
 	}
 }
 
@@ -95,5 +103,7 @@ func (c Config) withDefaults() Config {
 	if c.DashboardPath == "" {
 		c.DashboardPath = DefaultBasePath
 	}
+	c.Health = c.Health.withDefaults()
+	c.Prometheus = c.Prometheus.withDefaults()
 	return c
 }

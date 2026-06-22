@@ -45,10 +45,26 @@ func registerDebugRoutes(r gin.IRouter, cfg Config) {
 		registerGET(r, cfg.MetricsPath, hasAuth, cfg.Auth, metricsHandler())
 	}
 
-	if cfg.EnableDashboard {
-		// Dashboard HTML is public; login form + API Basic Auth protect access.
-		r.GET(cfg.DashboardPath, dashboardHandler(cfg))
+	if cfg.Prometheus.enabled() {
+		registerGET(r, cfg.Prometheus.Path, hasAuth, cfg.Auth, prometheusHandler())
 	}
+
+	if cfg.EnableDashboard {
+		registerDashboardRoutes(r, cfg)
+	}
+}
+
+func registerDashboardRoutes(r gin.IRouter, cfg Config) {
+	hasAuth := cfg.Auth != nil && cfg.Auth.Username != ""
+
+	r.GET(cfg.DashboardPath, dashboardHandler(cfg))
+	if !hasAuth {
+		return
+	}
+
+	loginPath := dashboardLoginPath(cfg)
+	r.GET(loginPath, loginMethodNotAllowedHandler())
+	r.POST(loginPath, loginHandler(cfg.Auth))
 }
 
 func registerGET(r gin.IRouter, path string, hasAuth bool, auth *AuthConfig, handler gin.HandlerFunc) {

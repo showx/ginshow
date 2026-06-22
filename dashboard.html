@@ -27,7 +27,11 @@ section{margin-bottom:28px}
 section h2{font-size:1rem;font-weight:600;color:#cbd5e1;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #1e293b}
 table{width:100%;border-collapse:collapse;background:#111827;border:1px solid #1e293b;border-radius:12px;overflow:hidden}
 th,td{padding:10px 14px;text-align:left;border-bottom:1px solid #1e293b;font-size:.875rem}
-th{background:#0f172a;color:#94a3b8;font-weight:500;width:40%}
+th{background:#0f172a;color:#94a3b8;font-weight:500}
+th.route-col{width:auto}
+th.num-col{width:88px}
+td.num{color:#e2e8f0;font-variant-numeric:tabular-nums;text-align:right}
+td.route{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.8125rem}
 td{color:#e2e8f0;font-variant-numeric:tabular-nums}
 tr:last-child td,tr:last-child th{border-bottom:none}
 .links{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
@@ -68,6 +72,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 .login-field input{width:100%;padding:10px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#f8fafc;font-size:.9375rem}
 .login-field input:focus{outline:none;border-color:#3b82f6}
 .login-error{min-height:1.25rem;color:#fca5a5;font-size:.8125rem;margin-bottom:12px}
+.login-error:not(:empty){padding:8px 10px;background:#450a0a;border:1px solid #7f1d1d;border-radius:8px}
 .login-submit{width:100%;padding:10px 14px;border:none;border-radius:8px;background:#2563eb;color:#fff;font-size:.9375rem;font-weight:600;cursor:pointer}
 .login-submit:hover{background:#1d4ed8}
 .login-submit:disabled{opacity:.6;cursor:not-allowed}
@@ -78,9 +83,9 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 </head>
 <body>
 <div id="login-screen" class="login-screen{{if not .RequireAuth}} hidden{{end}}">
-  <form class="login-card" id="login-form">
+  <form class="login-card" id="login-form" method="post" action="{{.LoginPath}}">
     <h2>登录监控面板</h2>
-    <p>请输入账号密码以访问运行时指标、pprof 与火焰图。</p>
+    <p>请输入账号密码后点击登录（请求：<code>POST {{.LoginPath}}</code>）。</p>
     <div class="login-field">
       <label for="login-user">账号</label>
       <input id="login-user" name="username" type="text" autocomplete="username" required>
@@ -90,7 +95,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
       <input id="login-pass" name="password" type="password" autocomplete="current-password" required>
     </div>
     <div class="login-error" id="login-error"></div>
-    <button type="submit" class="login-submit" id="login-submit">登录</button>
+    <button type="button" class="login-submit" id="login-submit">登录</button>
   </form>
 </div>
 
@@ -118,7 +123,40 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
       <div class="card"><div class="label">进行中</div><div class="value" id="v-inflight">—</div></div>
       <div class="card"><div class="label">慢请求</div><div class="value" id="v-slow">—</div></div>
       <div class="card"><div class="label">平均延迟</div><div class="value" id="v-latency">—</div></div>
+      <div class="card"><div class="label">P95 延迟</div><div class="value" id="v-p95">—</div></div>
+      <div class="card"><div class="label">P99 延迟</div><div class="value" id="v-p99">—</div></div>
+      <div class="card"><div class="label">5xx</div><div class="value" id="v-errors-5xx">—</div><div class="sub" id="v-error-rate">—</div></div>
+      <div class="card"><div class="label">Panic</div><div class="value" id="v-panics">—</div><div class="sub" id="v-panic-rate">—</div></div>
+      <div class="card"><div class="label">4xx 错误率</div><div class="value" id="v-client-error-rate">—</div></div>
     </div>
+  </section>
+
+  <section>
+    <h2>状态码分布</h2>
+    <table><tbody id="status-code-table"></tbody></table>
+  </section>
+
+  <section>
+    <h2>Route 统计</h2>
+    <p style="font-size:.8125rem;color:#94a3b8;margin-bottom:12px">按 Gin 路由模板聚合（FullPath），避免真实 URL 导致 label 爆炸。</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Route</th>
+          <th>请求数</th>
+          <th>5xx</th>
+          <th>Panic</th>
+          <th>5xx 率</th>
+          <th>4xx 率</th>
+          <th>平均延迟</th>
+          <th>P95</th>
+          <th>P99</th>
+          <th>慢请求</th>
+          <th>状态码</th>
+        </tr>
+      </thead>
+      <tbody id="route-stats-table"></tbody>
+    </table>
   </section>
 
   <section>
@@ -181,8 +219,17 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 (function(){
   const CFG = {{.ConfigJSON}};
   const AUTH_KEY = 'ginshow_auth';
+  let timer = null;
 
   const $ = id => document.getElementById(id);
+
+  function toBasicAuth(username, password) {
+    return 'Basic ' + btoa(username + ':' + password);
+  }
+
+  function saveAuth(username, password) {
+    sessionStorage.setItem(AUTH_KEY, JSON.stringify({ username, password }));
+  }
 
   function getAuth() {
     if (!CFG.requireAuth) return null;
@@ -195,7 +242,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
   function authHeader() {
     const a = getAuth();
     if (!a) return {};
-    return { Authorization: 'Basic ' + btoa(unescape(encodeURIComponent(a.username + ':' + a.password))) };
+    return { Authorization: toBasicAuth(a.username, a.password) };
   }
 
   async function fetchAuth(url, opts) {
@@ -229,14 +276,63 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
     if (CFG.requireAuth) $('btn-logout').classList.remove('hidden');
   }
 
+  function setLoginLoading(loading) {
+    const btn = $('login-submit');
+    btn.disabled = loading;
+    btn.textContent = loading ? '登录中…' : '登录';
+  }
+
+  async function loginWithCredentials(username, password) {
+    const data = await verifyLogin(username, password);
+    showApp();
+    renderLinks();
+    render(data);
+    setStatus(true, '已连接');
+    schedule();
+    return data;
+  }
+
   async function verifyLogin(username, password) {
-    sessionStorage.setItem(AUTH_KEY, JSON.stringify({ username, password }));
-    const res = await fetch(CFG.metricsPath, { cache: 'no-store', headers: authHeader() });
-    if (!res.ok) {
-      clearAuth();
-      throw new Error('账号或密码错误');
+    username = (username || '').trim();
+    password = password || '';
+
+    if (!username || !password) {
+      throw new Error('请输入账号和密码');
     }
-    return res.json();
+
+    if (CFG.requireAuth && CFG.loginPath) {
+      const res = await fetch(CFG.loginPath, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+
+      let body = {};
+      try { body = await res.json(); } catch (_) {}
+
+      if (!res.ok) {
+        clearAuth();
+        if (res.status === 401) throw new Error('账号或密码错误');
+        if (res.status === 404) throw new Error('登录接口不存在 (404): ' + CFG.loginPath + '，请确认服务已重启');
+        throw new Error(body.error ? String(body.error) : ('登录失败 (HTTP ' + res.status + ')'));
+      }
+    } else if (CFG.requireAuth) {
+      throw new Error('登录接口未配置，请重启服务');
+    }
+
+    saveAuth(username, password);
+
+    const metricsRes = await fetch(CFG.metricsPath, {
+      cache: 'no-store',
+      headers: authHeader()
+    });
+    if (!metricsRes.ok) {
+      clearAuth();
+      if (metricsRes.status === 401) throw new Error('账号或密码错误');
+      throw new Error('无法加载指标 (HTTP ' + metricsRes.status + ')');
+    }
+    return metricsRes.json();
   }
 
   async function bootstrap() {
@@ -251,34 +347,40 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
     showLogin('');
     const auth = getAuth();
     if (auth) {
+      showLogin('正在恢复登录状态…');
+      setLoginLoading(true);
       try {
-        const data = await verifyLogin(auth.username, auth.password);
-        showApp();
-        renderLinks();
-        render(data);
-        setStatus(true, '已连接');
-        schedule();
+        await loginWithCredentials(auth.username, auth.password);
         return;
-      } catch {
-        showLogin('登录已过期，请重新登录');
+      } catch (err) {
+        showLogin(err.message || '登录已过期，请重新登录');
+      } finally {
+        setLoginLoading(false);
       }
     }
   }
 
-  $('login-form').addEventListener('submit', async e => {
-    e.preventDefault();
+  async function handleLoginSubmit() {
     $('login-error').textContent = '';
-    $('login-submit').disabled = true;
+    setLoginLoading(true);
     try {
-      const data = await verifyLogin($('login-user').value, $('login-pass').value);
-      showApp();
-      renderLinks();
-      render(data);
-      schedule();
+      await loginWithCredentials($('login-user').value, $('login-pass').value);
     } catch (err) {
-      $('login-error').textContent = err.message || '登录失败';
+      showLogin(err.message || '登录失败');
     } finally {
-      $('login-submit').disabled = false;
+      setLoginLoading(false);
+    }
+  }
+
+  $('login-form').addEventListener('submit', e => {
+    e.preventDefault();
+    handleLoginSubmit();
+  });
+  $('login-submit').addEventListener('click', handleLoginSubmit);
+  $('login-pass').addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleLoginSubmit();
     }
   });
 
@@ -355,6 +457,57 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
     $('cmd-trace').textContent = 'wget -O trace.out "' + origin + CFG.pprofPrefix + '/trace?seconds=5" && go tool trace trace.out';
   }
 
+  function fmtRate(v) {
+    if (v == null || isNaN(v)) return '—';
+    return (v * 100).toFixed(2) + '%';
+  }
+
+  function fmtStatusCodes(codes) {
+    if (!codes) return '—';
+    return Object.keys(codes).sort((a,b)=>Number(a)-Number(b))
+      .map(k => k + ':' + codes[k]).join(' · ');
+  }
+
+  function renderStatusCodes(codes) {
+    if (!codes || !Object.keys(codes).length) {
+      $('status-code-table').innerHTML = '<tr><td colspan="2" style="color:#64748b">暂无数据</td></tr>';
+      return;
+    }
+    const rows = Object.keys(codes).sort((a,b)=>Number(a)-Number(b)).map(code => {
+      const cls = Number(code) >= 500 ? ' style="color:#fca5a5"' :
+        (Number(code) >= 400 ? ' style="color:#fcd34d"' : '');
+      return '<tr><th>' + code + '</th><td' + cls + '>' + codes[code] + '</td></tr>';
+    });
+    $('status-code-table').innerHTML = rows.join('');
+  }
+
+  function fmtMs(v) {
+    return v != null ? v.toFixed(2) + ' ms' : '—';
+  }
+
+  function renderRouteStats(routes) {
+    const tbody = $('route-stats-table');
+    if (!routes || !routes.length) {
+      tbody.innerHTML = '<tr><td colspan="11" style="color:#64748b">暂无数据</td></tr>';
+      return;
+    }
+    tbody.innerHTML = routes.map(r =>
+      '<tr>' +
+      '<td class="route">' + esc(r.route) + '</td>' +
+      '<td class="num">' + (r.requests ?? 0) + '</td>' +
+      '<td class="num">' + (r.errors_5xx ?? 0) + '</td>' +
+      '<td class="num">' + (r.panics ?? 0) + '</td>' +
+      '<td class="num">' + fmtRate(r.error_rate) + '</td>' +
+      '<td class="num">' + fmtRate(r.client_error_rate) + '</td>' +
+      '<td class="num">' + fmtMs(r.avg_latency_ms) + '</td>' +
+      '<td class="num">' + fmtMs(r.p95_latency_ms) + '</td>' +
+      '<td class="num">' + fmtMs(r.p99_latency_ms) + '</td>' +
+      '<td class="num">' + (r.slow_requests ?? 0) + '</td>' +
+      '<td>' + esc(fmtStatusCodes(r.status_codes)) + '</td>' +
+      '</tr>'
+    ).join('');
+  }
+
   function renderMemory(m) {
     const rows = [
       ['当前分配 (alloc)', fmtBytes(m.alloc_bytes)],
@@ -389,8 +542,17 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
     $('v-req-sub').textContent = '运行 ' + (req.uptime || '—');
     $('v-inflight').textContent = req.in_flight ?? '—';
     $('v-slow').textContent = req.slow_requests ?? '—';
-    $('v-latency').textContent = (req.avg_latency_ms != null ? req.avg_latency_ms.toFixed(2) + ' ms' : '—');
+    $('v-latency').textContent = fmtMs(req.avg_latency_ms);
+    $('v-p95').textContent = fmtMs(req.p95_latency_ms);
+    $('v-p99').textContent = fmtMs(req.p99_latency_ms);
+    $('v-errors-5xx').textContent = req.errors_5xx ?? '—';
+    $('v-error-rate').textContent = '5xx 率 ' + fmtRate(req.error_rate);
+    $('v-panics').textContent = req.panics ?? '—';
+    $('v-panic-rate').textContent = 'Panic 率 ' + fmtRate(req.panic_rate);
+    $('v-client-error-rate').textContent = fmtRate(req.client_error_rate);
 
+    renderStatusCodes(req.status_codes);
+    renderRouteStats(req.routes);
     renderMemory(data.memory || {});
     setStatus(true, '已连接');
     showError('');
@@ -408,14 +570,13 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
     }
   }
 
-  let timer = null;
+  $('btn-refresh').addEventListener('click', refresh);
+  $('auto-refresh').addEventListener('change', schedule);
+
   function schedule() {
     if (timer) clearInterval(timer);
     if ($('auto-refresh').checked) timer = setInterval(refresh, 3000);
   }
-
-  $('btn-refresh').addEventListener('click', refresh);
-  $('auto-refresh').addEventListener('change', schedule);
 
   // ---- flame graph ----
   const flameState = { root: null, unit: '', type: '', stack: [] };
@@ -621,7 +782,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
   $('flame-seconds').disabled = $('flame-type').value !== 'cpu';
 
   renderLinks();
-  bootstrap();
+  bootstrap().catch(err => showLogin('初始化失败: ' + (err.message || err)));
 })();
 </script>
 </body>

@@ -7,17 +7,26 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/showx/ginshow"
+	gshowgorm "github.com/showx/ginshow/gorm"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 func main() {
-	// 账号密码可通过环境变量覆盖，生产环境务必修改默认值。
 	username := envOr("GINSHOW_USER", "admin")
 	password := envOr("GINSHOW_PASS", "ginshow")
 
+	db, err := gorm.Open(sqlite.Open("file:ginshow_example?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("open gorm db: %v", err)
+	}
+
 	r := gin.Default()
 
-	// 启用 Basic Auth：面板需登录，metrics / pprof / 火焰图 API 亦受保护。
 	cfg := ginshow.Production(username, password)
+	cfg.Health.Checks = []ginshow.NamedCheck{
+		gshowgorm.Check("primary", db),
+	}
 	ginshow.Mount(r, cfg)
 
 	r.GET("/api/hello", func(c *gin.Context) {
@@ -27,6 +36,9 @@ func main() {
 
 	log.Println("ginshow example started")
 	log.Printf("  dashboard : http://localhost:8080%s", cfg.DashboardPath)
+	log.Printf("  healthz   : http://localhost:8080%s", cfg.Health.HealthzPath)
+	log.Printf("  readyz    : http://localhost:8080%s", cfg.Health.ReadyzPath)
+	log.Printf("  prometheus: http://localhost:8080%s", cfg.Prometheus.Path)
 	log.Printf("  username  : %s", username)
 	log.Printf("  password  : %s", password)
 

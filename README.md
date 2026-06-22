@@ -41,10 +41,17 @@ func main() {
 运行示例：
 
 ```bash
-go run ./example/
-# 默认账号 admin / 密码 ginshow
-# 打开 http://localhost:8080/__gs/x7f3a2c9 在登录页输入账号密码
+# Git Bash / Linux / macOS
+GINSHOW_USER=admin GINSHOW_PASS=your-secret go run ./example/
+
+# PowerShell (Windows)
+$env:GINSHOW_USER="admin"; $env:GINSHOW_PASS="your-secret"; go run ./example/
+
+# CMD (Windows)
+set GINSHOW_USER=admin&& set GINSHOW_PASS=your-secret&& go run ./example/
 ```
+
+> **注意**：`GINSHOW_USER=admin GINSHOW_PASS=xxx` 这种写法在 **PowerShell / CMD 下无效**，密码不会生效，服务端仍用默认密码 `ginshow`。请按上面平台对应方式设置环境变量，或直接看启动日志里打印的 `username` / `password`。
 
 本地开发若不需要登录，可使用无认证配置：
 
@@ -63,6 +70,9 @@ ginshow.Mount(r, ginshow.Default())
 | `GET /__gs/x7f3a2c9/pprof/goroutine` | Goroutine |
 | `GET /__gs/x7f3a2c9/pprof/trace` | 执行追踪 |
 | `GET /__gs/x7f3a2c9/pprof/flame` | 火焰图 JSON 数据（面板内可视化） |
+| `GET /__gs/x7f3a2c9/prometheus` | **Prometheus** 指标（text exposition） |
+| `GET /healthz` | 存活探针（liveness） |
+| `GET /readyz` | 就绪探针（readiness，含数据库等依赖检查） |
 
 浏览器打开 **http://localhost:8080/__gs/x7f3a2c9**，在「火焰图」区域选择类型并加载即可交互查看（无需 `go tool pprof`）。
 
@@ -73,8 +83,10 @@ ginshow.Mount(r, ginshow.Default())
 - **内嵌监控面板** — 单 HTML 文件（CSS/JS 内联），Go `embed` 加载，零外部依赖
 - **pprof 集成** — 标准 `net/http/pprof` 端点，支持 CPU、heap、goroutine、mutex、block、trace
 - **运行时指标** — 内存、GC、goroutine 数量及请求统计，JSON 格式便于对接监控
-- **请求监控** — 自动统计 QPS、平均延迟、慢请求；debug 路由不计入统计
+- **请求监控** — 按 **Gin 路由模板**（FullPath）聚合，含错误率、状态码分布，避免真实 URL label 爆炸
 - **账号密码登录** — `Production()` 启用后面板显示登录页，metrics / pprof / 火焰图 API 需认证
+- **Prometheus 指标** — 标准 `/prometheus` 端点，按 route 模板打 label，含延迟 histogram
+- **健康检查** — 内置 `/healthz`、`/readyz`，支持 GORM 数据库连通性与连接池状态
 - **生产环境保护** — 内置 Basic Auth，一行切换生产配置
 
 ## 配置
@@ -92,6 +104,114 @@ ginshow.Mount(r, ginshow.Default())
 - 开启请求监控中间件
 - 慢请求阈值 500ms
 - 监控面板路径 `/__gs/x7f3a2c9`
+- 健康检查 `/healthz`、`/readyz`（无需认证，供 K8s / 负载均衡探测）
+- Prometheus 指标 `/__gs/x7f3a2c9/prometheus`（默认开启）
+
+### Prometheus 指标
+
+默认开启，路径 `{DefaultBasePath}/prometheus`。`Production()` 下需 Basic Auth。
+
+```yaml
+# prometheus.yml 片段
+scrape_configs:
+  - job_name: ginshow
+    metrics_path: /__gs/x7f3a2c9/prometheus
+    static_configs:
+      - targets: ['localhost:8080']
+```
+
+主要指标（namespace 默认 `ginshow`）：
+
+| 指标 | 类型 | Labels |
+|------|------|--------|
+| `ginshow_http_requests_total` | Counter | `method`, `route`, `code` |
+| `ginshow_http_request_duration_seconds` | Histogram | `method`, `route` |
+| `ginshow_http_slow_requests_total` | Counter | `method`, `route` |
+| `ginshow_http_requests_in_flight` | Gauge | — |
+| `ginshow_goroutines` | Gauge | — |
+| `ginshow_memory_heap_alloc_bytes` | Gauge | — |
+| `ginshow_process_uptime_seconds` | Gauge | — |
+
+另含标准 `go_*`、`process_*` 指标（Go / 进程 collector）。
+
+`route` label 使用 Gin `FullPath()` 模板（如 `/api/users/:id`），**不会**使用真实 URL。
+
+自定义：
+
+```go
+cfg.Prometheus.Enable = true
+cfg.Prometheus.Path = "/metrics"           // 也可挂到标准路径
+cfg.Prometheus.Namespace = "myapp"
+cfg.Prometheus.DisableGoCollector = false
+ginshow.Mount(r, cfg)
+```
+
+### 健康检查与 GORM 数据库
+
+默认已开启 `/healthz` 与 `/readyz`，**不需要认证**（便于 K8s 探针调用）。
+
+```go
+import (
+	"github.com/showx/ginshow"
+	gshowgorm "github.com/showx/ginshow/gorm"
+)
+
+cfg := ginshow.Production("admin", os.Getenv("GINSHOW_PASS"))
+cfg.Health.Checks = []ginshow.NamedCheck{
+	gshowgorm.Check("primary", db),   // 单库
+	// 或多库：
+	// gshowgorm.Checks(map[string]*gorm.DB{"primary": db, "readonly": roDB)...,
+}
+ginshow.Mount(r, cfg)
+```
+
+**healthz** — 进程存活即返回 200：
+
+```json
+{"status":"ok","timestamp":"2026-06-22T12:00:00Z"}
+```
+
+**readyz** — 所有检查通过返回 200，否则 503：
+
+```json
+{
+  "status": "ready",
+  "timestamp": "2026-06-22T12:00:00Z",
+  "checks": [
+    {
+      "name": "gorm:primary",
+      "status": "ok",
+      "latency_ms": 1.23,
+      "detail": {
+        "open_connections": 1,
+        "in_use": 0,
+        "idle": 1,
+        "max_open": 0
+      }
+    }
+  ]
+}
+```
+
+自定义检查：
+
+```go
+cfg.Health.Checks = append(cfg.Health.Checks,
+	ginshow.SimpleCheck("redis", func(ctx context.Context) error {
+		return rdb.Ping(ctx).Err()
+	}),
+)
+```
+
+关闭健康检查或修改路径：
+
+```go
+cfg.Health.EnableHealthz = false
+cfg.Health.EnableReadyz = false
+cfg.Health.HealthzPath = "/healthz"
+cfg.Health.ReadyzPath = "/readyz"
+cfg.Health.CheckTimeout = 5 * time.Second
+```
 
 ### 安全建议
 
@@ -124,8 +244,8 @@ ginshow.Mount(r, cfg)
 ginshow.Mount(r, ginshow.Production("admin", os.Getenv("GINSHOW_PASS")))
 ```
 
-- 面板：打开后先显示**登录页**（非浏览器弹窗），登录成功后加载数据
-- API：`/metrics`、`/pprof/*`、`/flame` 等接口仍受 HTTP Basic Auth 保护
+- 面板：打开后显示**登录表单**，通过 `POST /__gs/x7f3a2c9/login` 校验（**不要** POST 到面板页本身，会 404）
+- API：`/metrics`、`/pprof/*`、`/flame` 等接口受 HTTP Basic Auth 保护
 - 命令行访问 pprof 需携带认证：`http://user:pass@host/.../pprof/heap`
 
 ### 自定义配置
@@ -230,10 +350,26 @@ curl http://localhost:8080{BASE}/metrics
     "total_requests": 1024,
     "in_flight": 3,
     "slow_requests": 2,
-    "avg_latency_ms": 12.5
+    "avg_latency_ms": 12.5,
+    "error_rate": 0.01,
+    "client_error_rate": 0.03,
+    "status_codes": {"200": 980, "404": 30, "500": 14},
+    "routes": [
+      {
+        "route": "GET /api/users/:id",
+        "requests": 500,
+        "error_rate": 0,
+        "client_error_rate": 0.02,
+        "avg_latency_ms": 8.2,
+        "slow_requests": 1,
+        "status_codes": {"200": 490, "404": 10}
+      }
+    ]
   }
 }
 ```
+
+`route` 使用 Gin 的 `FullPath()` 模板（如 `/api/users/:id`），**不会**按 `/api/users/123` 这类真实 URL 拆分。未匹配路由归入 `GET __unmatched__`。
 
 代码中也可直接获取：
 
@@ -252,6 +388,11 @@ data, err := ginshow.MetricsJSON()
 | `Production(user, pass)` | 返回带 Basic Auth 的生产配置 |
 | `Middleware(cfg)` | 单独使用请求监控中间件 |
 | `MetricsJSON()` | 获取当前运行时指标 JSON |
+| `DefaultHealth()` | 默认健康检查配置 |
+| `DefaultPrometheus()` | 默认 Prometheus 配置 |
+| `SimpleCheck(name, fn)` | 自定义 readiness 检查 |
+| `gorm.Check(name, db)` | GORM 数据库 Ping + 连接池详情 |
+| `gorm.Checks(map)` | 批量注册多库检查 |
 
 ## 开发
 

@@ -25,6 +25,7 @@ type dashboardPage struct {
 	Title       string
 	ConfigJSON  template.JS
 	RequireAuth bool
+	LoginPath   string
 }
 
 func loadDashboardTemplate() (*template.Template, error) {
@@ -46,6 +47,7 @@ func dashboardHandler(cfg Config) gin.HandlerFunc {
 			"metricsPath": cfg.MetricsPath,
 			"pprofPrefix": cfg.PprofPrefix,
 			"requireAuth": cfg.Auth != nil && cfg.Auth.Username != "",
+			"loginPath":   dashboardLoginPath(cfg),
 		})
 		if err != nil {
 			c.String(http.StatusInternalServerError, "dashboard config error: %v", err)
@@ -63,6 +65,7 @@ func dashboardHandler(cfg Config) gin.HandlerFunc {
 			Title:       title,
 			ConfigJSON:  template.JS(configJSON),
 			RequireAuth: requireAuth,
+			LoginPath:   dashboardLoginPath(cfg),
 		}); err != nil {
 			c.String(http.StatusInternalServerError, "dashboard render error: %v", err)
 			return
@@ -80,7 +83,21 @@ func isInternalDebugPath(path string, cfg Config) bool {
 	if path == cfg.MetricsPath {
 		return true
 	}
+	prom := cfg.Prometheus.withDefaults()
+	if prom.Enable && path == prom.Path {
+		return true
+	}
 	if cfg.EnableDashboard && path == cfg.DashboardPath {
+		return true
+	}
+	if cfg.EnableDashboard && path == dashboardLoginPath(cfg) {
+		return true
+	}
+	health := cfg.Health.withDefaults()
+	if health.EnableHealthz && path == health.HealthzPath {
+		return true
+	}
+	if health.EnableReadyz && path == health.ReadyzPath {
 		return true
 	}
 	return false

@@ -176,6 +176,34 @@ func TestProductionAuth(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "登录监控面板") {
 		t.Fatalf("dashboard should contain login page")
 	}
+	if !strings.Contains(rec.Body.String(), `action="/__gs/x7f3a2c9/login"`) {
+		t.Fatalf("dashboard form should POST to login path")
+	}
+
+	loginBody := strings.NewReader(`{"username":"admin","password":"secret"}`)
+	req = httptest.NewRequest(http.MethodPost, cfg.DashboardPath+"/login", loginBody)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	loginBody = strings.NewReader(`{"username":"admin","password":"wrong"}`)
+	req = httptest.NewRequest(http.MethodPost, cfg.DashboardPath+"/login", loginBody)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("login expected 401, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, cfg.DashboardPath+"/login", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET login expected 405, got %d", rec.Code)
+	}
 
 	req = httptest.NewRequest(http.MethodGet, cfg.MetricsPath, nil)
 	rec = httptest.NewRecorder()

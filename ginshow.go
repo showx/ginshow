@@ -21,7 +21,15 @@ func Mount(r *gin.Engine, cfg Config) {
 		r.Use(Middleware(cfg))
 	}
 
+	if cfg.Prometheus.enabled() {
+		setupPrometheus(cfg.Prometheus)
+	}
+
 	registerDebugRoutes(r, cfg)
+
+	if cfg.Health.enabled() {
+		registerHealthRoutes(r, cfg.Health)
+	}
 }
 
 // Attach registers only debug endpoints on an existing router group.
@@ -29,6 +37,9 @@ func Mount(r *gin.Engine, cfg Config) {
 func Attach(group *gin.RouterGroup, cfg Config) {
 	cfg = cfg.withDefaults()
 	applyRuntimeProfiling(cfg)
+	if cfg.Prometheus.enabled() {
+		setupPrometheus(cfg.Prometheus)
+	}
 	registerDebugRoutes(group, cfg)
 }
 
